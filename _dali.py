@@ -44,9 +44,9 @@ class rx():
         Called on program exit to cleanup.
         """
         if self._cb is not None:
-         self.pi.set_glitch_filter(self.gpio, 0) # Remove glitch filter.
-         self._cb.cancel()
-         self._cb = None
+            self.pi.set_glitch_filter(self.gpio, 0) # Remove glitch filter.
+            self._cb.cancel()
+            self._cb = None
 
     def _wdog(self):
         """
@@ -56,8 +56,7 @@ class rx():
         If called before the watchdog has fired, we cancel the previous
         timer object and create a new one.
         """
-        self._t.cancel() if self._t is not None else None
-        self._t = threading.Timer(self.STP_2TE/1000, self._stop)
+        self._t = threading.Timer(0.003, self._stop)
         self._t.start()
 
     def _stop(self):
@@ -69,7 +68,7 @@ class rx():
         self._edges = 0
         self._code = 0
         if self.cb is not None:
-            self.cb(self.frame)
+            self.cb(self.frame, [])
 
     def _decode(self,high_time,low_time):
         """
@@ -155,17 +154,17 @@ class rx():
                 else:
                     self._prev = 0
 
-    def _cbe(self, g, l, t):
+    def _cbe(self, gpio, level, tick):
         """
         Called on either rising or falling edge of the gpio, the time
         since the last edge is recorded and a pair of value are passed
         to the decode method on each rising edge.  The watchdog is used
         to signal the end of the frame.
         """
-        edge_len = pigpio.tickDiff(self._last_edge_tick, t)
-        self._last_edge_tick = t
+        self._t.cancel() if self._t is not None else None
 
-        self._wdog()
+        edge_len = pigpio.tickDiff(self._last_edge_tick, tick)
+        self._last_edge_tick = tick
 
         if self._edges < 2:
             self._prev = 1 # Start bit
@@ -179,6 +178,8 @@ class rx():
 
         self._edges += 1
         
+        self._wdog()
+
 
 class tx():
     """

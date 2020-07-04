@@ -6,10 +6,9 @@ import pigpio
 import _dali
 import atexit
 
-HOST='rpi-bc.jalloq.co.uk'
+HOST='localhost'
 LEDS = [17,13,12,16]
 RX = 23
-
 
 def init_leds():
     for led in LEDS:
