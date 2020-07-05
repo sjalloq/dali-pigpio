@@ -16,21 +16,20 @@ class rx():
     MAX_2TE = 900
     STP_2TE = 1800
 
-    def __init__(self, pi, gpio, callback=None, 
-                    min_bits=8, max_bits=24,glitch=50):
+    def __init__(self, pi, gpio, callback=None, glitch=150):
         """
-
+        User must pass in the pigpio.pi object, the gpio number to use as the receive pin
+        and a callback method to be called on every received frame.
         """
-        self.pi = pi
-        self.gpio = gpio
-        self.cb = callback
-        self.min_bits = min_bits
-        self.max_bits = max_bits
+        self.pi     = pi
+        self.gpio   = gpio
+        self.cb     = callback
         self.glitch = glitch
 
-        self._in_code = 0
-        self._edges = 0
-        self._code = 0
+        self._in_code       = 0
+        self._edges         = 0
+        self._code          = 0
+        self._prev_edge_len = 0
         
         pi.set_mode(gpio, pigpio.INPUT)
         pi.set_glitch_filter(gpio, glitch)
@@ -51,21 +50,23 @@ class rx():
 
     def _wdog(self,milliseconds):
         """
-        Start a watchdog timer that fires after waiting for a time period
-        equivalent to 2 stop bits.  This signals the end of the frame.
-        
-        If called before the watchdog has fired, we cancel the previous
-        timer object and create a new one.
+        Starts a watchdog timer on the RX pin that fires after waiting for
+        the defined number of microseconds.
+
+        The watchdog can be cancelled before it has fired by calling this
+        method with a value of 0.
         """
         self.pi.set_watchdog(self.gpio, milliseconds)
 
     def _stop(self):
         """
-        Called at the end of a received frame.
+        Called at the end of a received frame after the stop bits have been
+        detected.  The user callback is called with the received frame as a
+        parameter.
         """
-        self.frame = self._code
+        self.frame  = self._code
         self._edges = 0
-        self._code = 0
+        self._code  = 0
         if self.cb is not None:
             self.cb(self.frame)
 
@@ -125,13 +126,13 @@ class rx():
         action = self._prev << 2
         
         if high_time > self.MIN_2TE and high_time < self.MAX_2TE:
-            action = action | 1;
+            action = action | 1
         elif not (high_time > self.MIN_TE and high_time < self.MAX_TE):
             self._in_code = 0
             pass
 
         if low_time > self.MIN_2TE and low_time < self.MAX_2TE:
-            action = action | 2;
+            action = action | 2
         elif not (low_time > self.MIN_TE and low_time < self.MAX_TE):
             self._in_code = 0
             pass
@@ -160,6 +161,8 @@ class rx():
         to the decode method on each rising edge.  A 2 millisecond 
         watchdog is used to signal the end of the frame.
         """
+
+        # Disable the watchdog
         self._wdog(0)
 
         if level < 2:
@@ -177,9 +180,10 @@ class rx():
                 else:
                     # Falling edge; capture the high time
                     self._prev_edge_len = edge_len
-
             self._edges += 1
-            self._wdog(3)
+
+            # Set the watchdog to a time equivalent to 2 stop bits
+            self._wdog(round(self.STP_2TE/1000.0))
         else:
             # Received watchdog timeout so end of frame
             self._stop()
@@ -200,7 +204,6 @@ class tx():
 
         self.pi.set_mode(gpio, pigpio.OUTPUT)
         self.pi.set_pull_up_down(gpio, pigpio.PUD_OFF)
-
 
     def _make_waves(self):
         """
@@ -229,7 +232,6 @@ class tx():
         self.pi.wave_add_generic(wf)
         self._wid1 = self.pi.wave_create()
 
-
     def send(self, code, bits=16, repeats=1):
         """
         Transmits a Dali frame.
@@ -250,7 +252,6 @@ class tx():
 
         while self.pi.wave_tx_busy():
             time.sleep(0.1)
-
 
     def cancel(self):
         """
