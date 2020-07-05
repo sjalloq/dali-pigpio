@@ -68,7 +68,7 @@ class rx():
         self._edges = 0
         self._code = 0
         if self.cb is not None:
-            self.cb(self.frame, [])
+            self.cb(self.frame)
 
     def _decode(self,high_time,low_time):
         """
