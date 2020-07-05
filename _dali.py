@@ -2,7 +2,7 @@
 
 import time
 import pigpio
-import threading
+
 
 class rx():
     """
@@ -31,7 +31,6 @@ class rx():
         self._in_code = 0
         self._edges = 0
         self._code = 0
-        self._t = None
         
         pi.set_mode(gpio, pigpio.INPUT)
         pi.set_glitch_filter(gpio, glitch)
@@ -45,10 +44,12 @@ class rx():
         """
         if self._cb is not None:
             self.pi.set_glitch_filter(self.gpio, 0) # Remove glitch filter.
+            self.pi.set_watchdog(self.gpio, 0) # Cancel the watchdog
             self._cb.cancel()
             self._cb = None
+            self.pi.stop()
 
-    def _wdog(self):
+    def _wdog(self,milliseconds):
         """
         Start a watchdog timer that fires after waiting for a time period
         equivalent to 2 stop bits.  This signals the end of the frame.
@@ -56,14 +57,12 @@ class rx():
         If called before the watchdog has fired, we cancel the previous
         timer object and create a new one.
         """
-        self._t = threading.Timer(0.003, self._stop)
-        self._t.start()
+        self.pi.set_watchdog(self.gpio, milliseconds)
 
     def _stop(self):
         """
         Called at the end of a received frame.
         """
-        self._t.cancel()
         self.frame = self._code
         self._edges = 0
         self._code = 0
@@ -158,27 +157,32 @@ class rx():
         """
         Called on either rising or falling edge of the gpio, the time
         since the last edge is recorded and a pair of value are passed
-        to the decode method on each rising edge.  The watchdog is used
-        to signal the end of the frame.
+        to the decode method on each rising edge.  A 2 millisecond 
+        watchdog is used to signal the end of the frame.
         """
-        self._t.cancel() if self._t is not None else None
+        self._wdog(0)
 
-        edge_len = pigpio.tickDiff(self._last_edge_tick, tick)
-        self._last_edge_tick = tick
+        if level < 2:
+            # Received an edge interrupt
+            edge_len = pigpio.tickDiff(self._last_edge_tick, tick)
+            self._last_edge_tick = tick
 
-        if self._edges < 2:
-            self._prev = 1 # Start bit
-        else:
-            if self._edges % 2:
-                # Rising edge
-                self._decode(self._prev_edge_len, edge_len)
+            if self._edges < 2:
+                # Start bit
+                self._prev = 1
             else:
-                # Falling edge
-                self._prev_edge_len = edge_len
+                if self._edges % 2:
+                    # Rising edge; decode the low/high time
+                    self._decode(self._prev_edge_len, edge_len)
+                else:
+                    # Falling edge; capture the high time
+                    self._prev_edge_len = edge_len
 
-        self._edges += 1
-        
-        self._wdog()
+            self._edges += 1
+            self._wdog(3)
+        else:
+            # Received watchdog timeout so end of frame
+            self._stop()
 
 
 class tx():
@@ -256,6 +260,7 @@ class tx():
         self.pi.wave_delete(self._stop)
         self.pi.wave_delete(self._wid0)
         self.pi.wave_delete(self._wid1)
+        self.pi.stop()
 
 
 if __name__ == '__main__':
@@ -265,30 +270,29 @@ if __name__ == '__main__':
     import pigpio
     import _dali
     import atexit
+    import argparse
 
-    HOST='10.0.0.242'
+    def callback(frame):
+        print('Dali frame = %s'%hex(frame))
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--host', help='specify the hostname', default='localhost')
+    args = parser.parse_args()
+
     LEDS = [17,13,12,16]
     RX = 23
     TX = 22
 
-    pi = pigpio.pi(HOST)
-    rx = _dali.rx(pi, RX)
+    pi = pigpio.pi(args.host)
+    rx = _dali.rx(pi, RX, callback)
 
     def init_leds():
         for led in LEDS:
             pi.write(led,1)      
 
-    def cleanup():
-        rx.cancel()  
-        pi.stop()
-        print('cleaned up')
-
-    atexit.register(cleanup)
+    atexit.register(rx.cancel)
 
     init_leds()
 
     while(True):
-        tx = _dali.tx(pi, TX)
-        tx.send(15,bits=8)
-        tx.cancel()
-        time.sleep(2)
+        time.sleep(20)

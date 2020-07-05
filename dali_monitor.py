@@ -18,11 +18,6 @@ def main(hostname):
             value = pi.read(led)
             print('led %s got value %s' % (led,value))
 
-    def cleanup():
-        rx.cancel()  
-        pi.stop()
-        print('cleaned up')
-
     def callback(frame):
         """
         Receives a Dali frame
@@ -32,12 +27,12 @@ def main(hostname):
     pi = pigpio.pi(HOST)
     rx = _dali.rx(pi, RX, callback)
 
-    atexit.register(cleanup)
+    atexit.register(rx.cancel)
 
     init_leds()
 
     while(True):
-        pass
+        time.sleep(1)
 
 
 if __name__ == '__main__':
