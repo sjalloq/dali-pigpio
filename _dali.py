@@ -30,6 +30,7 @@ class rx():
         self._edges         = 0
         self._code          = 0
         self._prev_edge_len = 0
+        self._timestamps    = []
         
         pi.set_mode(gpio, pigpio.INPUT)
         pi.set_glitch_filter(gpio, glitch)
@@ -46,7 +47,7 @@ class rx():
             self.pi.set_watchdog(self.gpio, 0) # Cancel the watchdog
             self._cb.cancel()
             self._cb = None
-            self.pi.stop()
+            #self.pi.stop()
 
     def _wdog(self,milliseconds):
         """
@@ -56,6 +57,7 @@ class rx():
         The watchdog can be cancelled before it has fired by calling this
         method with a value of 0.
         """
+        #print('watchdog being set to %sms'%milliseconds)
         self.pi.set_watchdog(self.gpio, milliseconds)
 
     def _stop(self):
@@ -68,7 +70,7 @@ class rx():
         self._edges = 0
         self._code  = 0
         if self.cb is not None:
-            self.cb(self.frame)
+            self.cb(self.frame, self._timestamps)
 
     def _decode(self,high_time,low_time):
         """
@@ -182,9 +184,15 @@ class rx():
                     self._prev_edge_len = edge_len
             self._edges += 1
 
+            # Capture the tick times for debug
+            self._timestamps.append({'level': level, 
+                                     'tick' : edge_len})
+
             # Set the watchdog to a time equivalent to 2 stop bits
-            self._wdog(round(self.STP_2TE/1000.0))
+            self._wdog(300)
         else:
+            edge_len = pigpio.tickDiff(self._last_edge_tick, tick)
+            print('wdog! time since edge=%s'%edge_len)
             # Received watchdog timeout so end of frame
             self._stop()
 
@@ -261,7 +269,7 @@ class tx():
         self.pi.wave_delete(self._stop)
         self.pi.wave_delete(self._wid0)
         self.pi.wave_delete(self._wid1)
-        self.pi.stop()
+        #self.pi.stop()
 
 
 if __name__ == '__main__':
