@@ -59,19 +59,17 @@ class rx():
         """
         self.pi.set_watchdog(self.gpio, milliseconds)
 
-    def stop(self):
+    def _stop(self):
         """
         Called at the end of a received frame after the stop bits have been
         detected.  The user callback is called with the received frame as a
         parameter.
         """
-        frame         = self._code
-        timestamps    = self._timestamps
-        self._edges   = 0
-        self._code    = 0
-        self._in_code = 0
+        self.frame  = self._code
+        self._edges = 0
+        self._code  = 0
         if self.cb is not None:
-            self.cb(frame, timestamps)
+            self.cb(self.frame, self._timestamps)
 
     def _decode(self,high_time,low_time):
         """
@@ -167,16 +165,11 @@ class rx():
 
         # Disable the watchdog
         self._wdog(0)
-            
+
         if level < 2:
             # Received an edge interrupt
-            
-            # Calculate the edge length
             edge_len = pigpio.tickDiff(self._last_edge_tick, tick)
             self._last_edge_tick = tick
-        
-            if self._in_code == 0:
-                self._timestamps = []
 
             if self._edges < 2:
                 # Start bit
@@ -192,15 +185,13 @@ class rx():
 
             # Capture the tick times for debug
             self._timestamps.append({'level': level, 
-                                     'tick' : tick,
-                                     'len'  : edge_len,
-                                     'bits' : self._edges})
+                                     'tick' : edge_len})
 
             # Set the watchdog to a time equivalent to 2 stop bits
             self._wdog(2)
         else:
             # Received watchdog timeout so end of frame
-            self.stop()
+            self._stop()
 
 
 class tx():
@@ -246,9 +237,9 @@ class tx():
         self.pi.wave_add_generic(wf)
         self._wid1 = self.pi.wave_create()
 
-    def send(self, code, bits=16, repeats=1):
+    def send(self, code, bits=8, repeat=2):
         """
-        Transmits a Dali frame.
+        Transmits an 8 bit code with a repeat of 2
         """
         chain = [255, 0, self._start]
 
@@ -260,7 +251,9 @@ class tx():
                 chain += [self._wid0]
             bit = bit >> 1
 
-        chain += [self._stop, 255, 1, repeats, 0]
+        chain += [  self._stop, 
+                    255, 2, 0, 36,
+                    255, 1, repeat, 0  ]
 
         self.pi.wave_chain(chain)
 
@@ -275,7 +268,6 @@ class tx():
         self.pi.wave_delete(self._stop)
         self.pi.wave_delete(self._wid0)
         self.pi.wave_delete(self._wid1)
-        #self.pi.stop()
 
 
 if __name__ == '__main__':
@@ -283,31 +275,52 @@ if __name__ == '__main__':
     import sys
     import time
     import pigpio
-    import _dali
     import atexit
     import argparse
 
-    def callback(frame):
-        print('Dali frame = %s'%hex(frame))
+
+    class Frame():
+        def __init__(self):
+            self.times = 0
+            self._frame = []
+            self._timestamps = []
+
+        def callback(self,frame,timestamps):
+            self.times +=1
+            self._frame.append(frame)
+            self._timestamps.append(timestamps)
+
+        def frame(self):
+            return hex(self._frame)
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--host', help='specify the hostname', default='localhost')
+    parser.add_argument('--repeat', help='specify how many times the frame should repeat', default=1)
     args = parser.parse_args()
 
-    LEDS = [17,13,12,16]
-    RX = 23
-    TX = 22
+    RX = 6
+    TX = 6
+
+    f = Frame()
 
     pi = pigpio.pi(args.host)
-    rx = _dali.rx(pi, RX, callback)
+    rx = rx(pi, RX, f.callback)
+    tx = tx(pi, TX)
 
-    def init_leds():
-        for led in LEDS:
-            pi.write(led,1)      
+    tx.send(0xCC, repeat=int(args.repeat))
+    #time.sleep(2)
+    #tx.send(0xD0)
 
-    atexit.register(rx.cancel)
+    time.sleep(1)
+    time.sleep(1)
+    rx.cancel()
+    tx.cancel()
+    pi.stop()
 
-    init_leds()
+    for frame,tstamp in zip(f._frame,f._timestamps):
+        print('saw frame=%s' % hex(frame))
+        print('got %s timestamps' % len(tstamp))
+        for t in tstamp:
+           print(t)
 
-    while(True):
-        time.sleep(20)
+    print('saw %s frames in total'%f.times)
