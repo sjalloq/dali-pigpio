@@ -163,9 +163,6 @@ class rx():
         watchdog is used to signal the end of the frame.
         """
 
-        # Disable the watchdog
-        self._wdog(0)
-
         if level < 2:
             # Received an edge interrupt
             edge_len = pigpio.tickDiff(self._last_edge_tick, tick)
@@ -174,6 +171,8 @@ class rx():
             if self._edges < 2:
                 # Start bit
                 self._prev = 1
+                # Set the watchdog to a time equivalent to 2 stop bits
+                self._wdog(2)
             else:
                 if self._edges % 2:
                     # Rising edge; decode the low/high time
@@ -187,10 +186,10 @@ class rx():
             self._timestamps.append({'level': level, 
                                      'tick' : edge_len})
 
-            # Set the watchdog to a time equivalent to 2 stop bits
-            self._wdog(2)
         else:
             # Received watchdog timeout so end of frame
+            self._wdog(0)
+            self._timestamps.append({'level': level, 'tick': pigpio.tickDiff(self._last_edge_tick, tick)})
             self._stop()
 
 
